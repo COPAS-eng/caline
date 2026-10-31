@@ -124,7 +124,7 @@
     requestAnimationFrame(() => {
       onScrollHeader();
       onProgress();
-      if (!reduceMotion) parallax();
+      if (!reduceMotion && finePointer) parallax();
       ticking = false;
     });
   };
@@ -271,6 +271,19 @@
   $('.lb-next', lightbox).addEventListener('click', () => openLightbox(current + 1));
   lightbox.addEventListener('click', (e) => { if (e.target === lightbox) closeLightbox(); });
 
+  // Swipe no celular
+  let touchStartX = null;
+  lightbox.addEventListener('touchstart', (e) => {
+    touchStartX = e.touches[0].clientX;
+  }, { passive: true });
+
+  lightbox.addEventListener('touchend', (e) => {
+    if (touchStartX === null) return;
+    const dx = e.changedTouches[0].clientX - touchStartX;
+    if (Math.abs(dx) > 55) openLightbox(current + (dx < 0 ? 1 : -1));
+    touchStartX = null;
+  }, { passive: true });
+
   document.addEventListener('keydown', (e) => {
     if (!lightbox.classList.contains('open')) return;
     if (e.key === 'Escape') closeLightbox();
@@ -294,5 +307,159 @@
     }, { threshold: 0.35 });
 
     sections.forEach((s) => navObserver.observe(s));
+  }
+  /* ---------------------------------------------------
+     13) FUNDO ANIMADO — partículas douradas + luz do mouse
+     --------------------------------------------------- */
+  const bgCanvas = $('#bgCanvas');
+  const cursorGlow = $('#cursorGlow');
+  const pointer = { x: -9999, y: -9999, active: false };
+
+  if (!reduceMotion && bgCanvas && bgCanvas.getContext) {
+    const ctx = bgCanvas.getContext('2d', { alpha: true });
+    let W = 0, H = 0, particles = [], rafId = null;
+
+    // sprite de brilho pré-renderizado (rápido)
+    const sprite = document.createElement('canvas');
+    const SS = 64;
+    sprite.width = sprite.height = SS;
+    const sctx = sprite.getContext('2d');
+    const grd = sctx.createRadialGradient(SS / 2, SS / 2, 0, SS / 2, SS / 2, SS / 2);
+    grd.addColorStop(0, 'rgba(232, 213, 163, 0.95)');
+    grd.addColorStop(0.3, 'rgba(201, 169, 97, 0.42)');
+    grd.addColorStop(1, 'rgba(201, 169, 97, 0)');
+    sctx.fillStyle = grd;
+    sctx.fillRect(0, 0, SS, SS);
+
+    const resize = () => {
+      const dpr = Math.min(window.devicePixelRatio || 1, 1.75);
+      W = window.innerWidth;
+      H = window.innerHeight;
+      bgCanvas.width = Math.floor(W * dpr);
+      bgCanvas.height = Math.floor(H * dpr);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+      const count = Math.min(W < 700 ? 34 : 78, Math.max(18, Math.round((W * H) / 26000)));
+      particles = Array.from({ length: count }, () => ({
+        x: Math.random() * W,
+        y: Math.random() * H,
+        r: Math.random() * 1.5 + 0.5,
+        vx: (Math.random() - 0.5) * 0.16,
+        vy: -(Math.random() * 0.22 + 0.04),
+        a: Math.random() * 0.4 + 0.12,
+        tw: Math.random() * Math.PI * 2,
+        tws: Math.random() * 0.02 + 0.005
+      }));
+    };
+
+    const frame = () => {
+      ctx.clearRect(0, 0, W, H);
+
+      // conexões entre partículas próximas (desligadas em telas pequenas)
+      const maxDist = W > 760 ? 118 : 88;
+      const maxD2 = maxDist * maxDist;
+      const drawLines = W > 640;
+
+      for (let i = 0; drawLines && i < particles.length; i++) {
+        const p = particles[i];
+        for (let j = i + 1; j < particles.length; j++) {
+          const q = particles[j];
+          const dx = p.x - q.x;
+          const dy = p.y - q.y;
+          const d2 = dx * dx + dy * dy;
+          if (d2 > maxD2) continue;
+
+          const alpha = (1 - Math.sqrt(d2) / maxDist) * 0.11;
+          ctx.strokeStyle = `rgba(201,169,97,${alpha.toFixed(3)})`;
+          ctx.lineWidth = 0.6;
+          ctx.beginPath();
+          ctx.moveTo(p.x, p.y);
+          ctx.lineTo(q.x, q.y);
+          ctx.stroke();
+        }
+      }
+
+      // partículas
+      for (const p of particles) {
+        p.tw += p.tws;
+        const twinkle = 0.55 + Math.sin(p.tw) * 0.45;
+
+        if (pointer.active) {
+          const dx = p.x - pointer.x;
+          const dy = p.y - pointer.y;
+          const d = Math.hypot(dx, dy);
+          if (d < 170 && d > 0.5) {
+            const f = (1 - d / 170) * 0.55;
+            p.x += (dx / d) * f;
+            p.y += (dy / d) * f;
+          }
+        }
+
+        p.x += p.vx;
+        p.y += p.vy;
+
+        if (p.y < -12) { p.y = H + 12; p.x = Math.random() * W; }
+        if (p.x < -12) p.x = W + 12;
+        if (p.x > W + 12) p.x = -12;
+
+        const alpha = p.a * twinkle;
+        const size = p.r * 9;
+        ctx.globalAlpha = alpha;
+        ctx.drawImage(sprite, p.x - size / 2, p.y - size / 2, size, size);
+        ctx.globalAlpha = 1;
+      }
+
+      rafId = requestAnimationFrame(frame);
+    };
+
+    let resizeTimer = null;
+    window.addEventListener('resize', () => {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(resize, 150);
+    });
+
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) {
+        cancelAnimationFrame(rafId);
+      } else {
+        cancelAnimationFrame(rafId);
+        rafId = requestAnimationFrame(frame);
+      }
+    });
+
+    resize();
+    rafId = requestAnimationFrame(frame);
+  }
+
+  /* Luz suave que acompanha o cursor */
+  if (!reduceMotion && finePointer && cursorGlow) {
+    let gx = 0, gy = 0, tx = 0, ty = 0, started = false;
+
+    const follow = () => {
+      gx += (tx - gx) * 0.14;
+      gy += (ty - gy) * 0.14;
+      cursorGlow.style.transform = `translate3d(${gx.toFixed(1)}px, ${gy.toFixed(1)}px, 0)`;
+      requestAnimationFrame(follow);
+    };
+
+    window.addEventListener('pointermove', (e) => {
+      tx = e.clientX;
+      ty = e.clientY;
+      pointer.x = e.clientX;
+      pointer.y = e.clientY;
+      pointer.active = true;
+
+      if (!started) {
+        started = true;
+        gx = tx; gy = ty;
+        cursorGlow.classList.add('on');
+        follow();
+      }
+    }, { passive: true });
+
+    document.addEventListener('pointerleave', () => {
+      pointer.active = false;
+      cursorGlow.classList.remove('on');
+    });
   }
 })();
