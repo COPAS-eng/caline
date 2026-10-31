@@ -86,7 +86,7 @@ h1, h2, h3 {
 .cursor-glow.on { opacity: 1; }
 
 /* Aurora — manchas de luz que respiram ao fundo das seções */
-.servicos, .resultados { overflow: hidden; }
+.servicos, .resultados, .faq { overflow: hidden; }
 
 .servicos::before,
 .resultados::before,
